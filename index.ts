@@ -70,7 +70,7 @@ app.get('/', (req: express.Request, res: express.Response) => {
 		var history = bcommit.history();
 		history.on("commit", (commit:Git.Commit) =>{
 			// Show the commit sha.
-			commitlist +=`<a href="http://localhost:${port}/${commit.sha()}">${commit.sha().slice(0,5)}${commit.date()}${commit.message()}</a><br>`;
+			commitlist +=`<a href="http://localhost:${port}/${commit.sha()}">${commit.sha().slice(0,5)} ${commit.message()}</a><br>`;
 		});
 		history.on('end', ()=>{
 			res.send(commitlist);
