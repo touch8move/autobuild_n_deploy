@@ -1,6 +1,6 @@
 import * as express from 'express';
 import * as Git from 'nodegit';
-// import * as crypto from 'crypto';
+import * as spawn from 'child_process';
 // import * as redis from 'redis';
 var sam1 = require('./sample');
 var app = express();
@@ -15,40 +15,97 @@ var app = express();
 // client.on('connect', ()=>{
 // 	console.log('connect redis');
 // })
+var port = 9000;
 var RP:Git.Repository;
 var ckCommit: Git.Commit;
+var target = '../travis';
 Git.Repository.open('travis')
 .then((repo:Git.Repository)=>{
 	RP = repo;
-	// return RP.getCommit('ce7822d53e80c76cc2331ac5254762237fbaa018')
+}).catch(()=>{
+	
 });
-// .then((commit:Git.Commit)=>{
-// 	ckCommit = commit
-// 	return Git.Checkout.tree(RP, ckCommit ,{checkoutStrategy:Git.Checkout.STRATEGY.SAFE})
-// })
-// .then(()=>{
-// 	return RP.setHeadDetached(ckCommit.id());
-// })
-// .then(()=>{
-// 	console.log('final~!');
-// })
-var app = express();
+var open = (name:string)=>{
+	return Git.Repository.open(name);
+}
+var clone = (url:string, dirPath:string)=>{
+	return Git.Clone.clone(url, dirPath)
+}
+var init = new Promise((resolve, reject)=>{
+	open(target).then((repo:Git.Repository)=>{
+		RP = repo;
+		resolve(repo);
+	}).catch(()=>{
+		resolve(clone("https://github.com/touch8move/travis.git", target));
+	})	
+});
+const cli = (cmd:string, output:string[]):Promise<string[]> =>{
+	const cmdSub = cmd.split(' ');
+	cmdSub.shift();
+	const cmdMain = cmd.split(' ', 1);
+	// console.log(cmdMain);
+	// console.log(cmdSub);
+	return new Promise((resolve, reject)=>{
+		const cmd = spawn.spawn(cmdMain[0], cmdSub);
+		cmd.stdout.on('data', (data:string)=>{
+			output.push(data);
+		});
+		cmd.stderr.on('data', (data:string)=>{
+			output.push(data);
+		})
+		cmd.on('close', (code)=>{
+			resolve(output);
+		});
+	})
+}
+Promise.resolve(init).then((repo:Git.Repository)=>{
+	RP = repo;
+})
 
+var app = express();
+app.get('/', (req: express.Request, res: express.Response) => {
+	var commitlist: string = '';
+	RP.getBranchCommit('master')
+	.then((bcommit:Git.Commit)=>{
+		var history = bcommit.history();
+		history.on("commit", (commit:Git.Commit) =>{
+			// Show the commit sha.
+			commitlist +=`<a href="http://localhost:${port}/${commit.sha()}">${commit.sha().slice(0,5)}${commit.date()}${commit.message()}</a><br>`;
+		});
+		history.on('end', ()=>{
+			res.send(commitlist);
+		})
+		history.start();
+	})
+});
 app.get('/:hash', (req: express.Request, res: express.Response) => {
 	RP.getCommit(req.params.hash)
 	.then((commit:Git.Commit)=>{
 		ckCommit = commit
+		console.log('git checkout');
 		return Git.Checkout.tree(RP, ckCommit ,{checkoutStrategy:Git.Checkout.STRATEGY.SAFE})
 	})
 	.then(()=>{
-		return RP.setHeadDetached(ckCommit.id());
-	})
-	.then((num:number)=>{
-		// console.log('final~!');
-		console.log(num);
-		res.send('msg: ' + ckCommit.message() +'  '+ num);
+		RP.setHeadDetached(ckCommit.id());
+		console.log('build');
+		var output:string[]=[];
+		return cli(`docker build -f ${target}/Dockerfile -t ${ckCommit.sha().slice(0,5)} ${target}`, output);
+	}).then((output:string[])=>{
+		console.log('add tag');
+		return cli(`docker tag ${ckCommit.sha().slice(0,5)} 127.0.0.1:5000/${ckCommit.sha().slice(0,5)}`, output);
+	}).then((output:string[])=>{
+		console.log('push');
+		return cli(`docker push 127.0.0.1:5000/${ckCommit.sha().slice(0,5)}`, output);
+	}).then((output:string[])=>{
+		var resdata:string='';
+		for(var ln of output){
+			resdata += `${ln} <br>`;
+		}
+		console.log('end process');
+		res.send(resdata);
 	});
 });
+
 // app.get('/:version/:method/:hash', (req: express.Request, res: express.Response) => {
 // 	if(req.params.method == 'spin'){
 // 		client.get(req.params.hash, (err:Error, data:string)=>{
@@ -79,109 +136,6 @@ app.get('/:hash', (req: express.Request, res: express.Response) => {
 // 		res.send('잘못된 메써드');
 // 	}
 // });
-app.listen(9000, ()=>{
+app.listen(port, ()=>{
 	console.log('server ready');
 })
-// Git.Clone.clone("https://github.com/touch8move/travis.git", "./travis");
-	// Look up this known commit.
-//   .then(function(repo:any) {
-//     // Use a known commit sha from this repository.
-//     return repo.getCommit("59b20b8d5c6ff8d09518454d4dd8b7b30f095ab5");
-//     // console.log(repo);
-//   })
-	// Look up a specific file within that commit.
-//   .then(function(commit:any) {
-//     return commit.getEntry("README.md");
-//   })
-//   // Get the blob contents from the file.
-//   .then(function(entry:any) {
-//     // Patch the blob to contain a reference to the entry.
-//     return entry.getBlob().then(function(blob:any) {
-//       blob.entry = entry;
-//       return blob;
-//     });
-//   })
-//   // Display information about the blob.
-//   .then(function(blob:any) {
-//     // Show the path, sha, and filesize in bytes.
-//     console.log(blob.entry.path() + blob.entry.sha() + blob.rawsize() + "b");
-
-//     // Show a spacer.
-//     console.log(Array(72).join("=") + "\n\n");
-
-//     // Show the entire file.
-//     console.log(String(blob));
-//   })
-//   .catch(function(err:any) { console.log(err); });
-// // Open the repository directory.
-// Git.Repository.open("tmp")
-// // Open the master branch.
-// Git.Repository.open('travis')
-// Git.Clone.clone('https://github.com/touch8move/travis.git','./travis', {
-// 	checkoutBranch: 'master',
-// })
-// var first = (repo:Git.Repository)=>{
-// 	RP = repo;
-// 	return repo.getCommit('7238f32b8a50b53cb4a644f03c20a6cc71c560c4')
-// }
-// var second = (commit:Git.Commit)=>{
-// 	ckCommit = commit
-// 	return Git.Checkout.tree(RP, ckCommit ,{checkoutStrategy:Git.Checkout.STRATEGY.SAFE})
-// }
-// var third = ()=>{
-// 	return RP.setHeadDetached(ckCommit.id());
-// }
-
-// .then((num:number)=>{console.log('num', num)})
-// repo.getBranch('refs/remotes/origin/' + branchName)
-// .then(function(reference) {
-	//checkout branch
-	// return repo.checkoutRef(reference);
-// });
-// .then((repo:Git.Repository) =>{
-	// return repo.getCommit('ce7822d53e80c76cc2331ac5254762237fbaa018');
-	// return repo.setHead('ce7822d53e80c76cc2331ac5254762237fbaa018');
-	// return repo.checkoutRef(repo.getCommit())
-	// return repo.getMasterCommit();
-	// return repo.getBranchCommit('05eb8');
-// })
-// Display information about commits on master.
-// .then(function(firstCommitOnMaster: Git.Commit) {
-// 	// Create a new history event emitter.
-// 	var history = firstCommitOnMaster.history();
-// 	// Create a counter to only show up to 9 entries.
-// 	var count = 0;
-
-// 	// Listen for commit events from the history.
-// 	history.on("commit", function(commit:Git.Commit) {
-// 		// Disregard commits past 9.
-// 		// if (++count >= 9) {
-// 		//   return;
-// 		// }
-
-// 		// Show the commit sha.
-// 		console.log(commit.sha().slice(0,5), commit.date(), commit.message());
-
-// 		// Store the author object.
-// 		// var author = commit.author();
-
-// 		// Display author information.
-// 		// console.log("Author:\t" + author.name() + " <" + author.email() + ">");
-
-// 		// Show the commit date.
-// 		// console.log("Date:\t" + commit.date());
-
-// 		// Give some space and show the message.
-// 		// console.log("\n    " + );
-// 	});
-// 	history.start();
-// //   history.start();
-// //   history.emit('commit');
-// //   history.start
-// 	// Start emitting events.
-// //   history.start();
-// });
-
-// .then((commit: Git.Commit)=>{
-// 	console.log(commit.message());
-// })
