@@ -1,6 +1,7 @@
 # build
 build
 dist
+tmp
 # Logs
 logs
 *.log
