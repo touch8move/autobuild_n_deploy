@@ -2,11 +2,15 @@ import * as express from 'express';
 import * as Git from 'nodegit';
 import * as spawn from 'child_process';
 import * as io from 'socket.io';
+import * as fs from 'fs';
+import * as path from 'path';
 // import * as redis from 'redis';
-var sam1 = require('./sample');
-var app = express();
+
+
+const app = express();
 app.use(express.static('dist'));
 app.use(express.static('src'));
+
 // const client = redis.createClient({
 // 	host: '127.0.0.1',
 // 	port: 6379
@@ -17,13 +21,14 @@ app.use(express.static('src'));
 // client.on('connect', ()=>{
 // 	console.log('connect redis');
 // })
+const registryUrl = '127.0.0.1:5000';
+const port = 9000;
+const repoDir = './tmp/';
 
-var port = 9000;
-var repoDir = '../';
-var target = '';
-var socketserver = io(3000);
-var mysocket:SocketIO.Socket;
-var repourl = '';
+const socketserver = io(3000);
+let mysocket:SocketIO.Socket;
+let repourl = '';
+let target = '';
 
 const cli = (cmd:string, output:string[]):Promise<string[]> =>{
 	const cmdSub = cmd.split(' ');
@@ -48,23 +53,24 @@ const cli = (cmd:string, output:string[]):Promise<string[]> =>{
 		});
 	})
 }
-var Repo:Git.Repository;
-var getRepo = ()=>{
+let Repo:Git.Repository;
+const getRepo = ()=>{
 	return new Promise((resolve, reject)=>{
-	console.log('getRepo', repoDir + target);
-	Git.Repository.open(repoDir + target)
-	.then((repo:Git.Repository)=>{
-		Repo = repo;
-		resolve(repo);
-	}).catch((err)=>{
-		console.log('no Repo');
-		if(repourl){
-			resolve(Git.Clone.clone(repourl, repoDir + target));
-		}
-	});
+		console.log('getRepo', repoDir + target);
+		Git.Repository.open(repoDir + target)
+		.then((repo:Git.Repository)=>{
+			Repo = repo;
+			resolve(repo);
+		}).catch((err)=>{
+			console.log('no Repo', err);
+			if(repourl){
+				console.log('url', repourl);
+				resolve(Git.Clone.clone(repourl, path.join(__dirname, repoDir, target)));
+			}
+		});
 	});
 }
-
+let commitlist: string = '';
 const repoInit = ()=>{
 	commitlist = '';
 	console.log('repoInit');
@@ -74,7 +80,7 @@ const repoInit = ()=>{
 		repo.getBranchCommit('master')
 		.then((bcommit:Git.Commit)=>{
 			console.log('entry');
-			var history = bcommit.history();
+			const history = bcommit.history();
 			history.on("commit", (commit:Git.Commit) =>{
 				commitlist+= `<div><button class="btn btn-primary" type="button" onclick="buildDocker('${commit.sha()}')">${commit.sha().slice(0,5)} ${commit.message()}</button></div>`;
 			});
@@ -84,18 +90,18 @@ const repoInit = ()=>{
 			});
 			history.start();
 		});
-	}).catch(()=>{
-		console.log('error');
+	}).catch((error)=>{
+		console.log('error', error);
 	})
 }
 
 socketserver.on('connect', (socket)=>{
 	mysocket = socket;
 	console.log('connected');
-	socket.on('debug', (data)=>{
+	socket.on('debug', (data:any)=>{
 		console.log('debug', data);
 	})
-	socket.on('url', (data)=>{
+	socket.on('url', (data:any)=>{
 		
 		repourl = data;
 		let tUrlA = repourl.split('/');
@@ -114,14 +120,21 @@ socketserver.on('connect', (socket)=>{
 		console.log('getData');
 		socket.emit('load', commitlist);
 	})
-	socket.on('build', (data)=>{
+	socket.on('build', (data:any)=>{
 		console.log('build');
-		let ckCommit:Git.Commit;
+		
 		if(Repo == undefined){
 			console.log('NO Repo... build');
 			return
 		}
-			
+		let output:string[]=[];
+		build(socket, Repo, output, data);
+	});
+});
+
+const build = (socket:SocketIO.Socket, Repo:Git.Repository, output:string[], data:any)=>{
+	let ckCommit:Git.Commit;
+	return new Promise((resolve, reject)=>{
 		Repo.getCommit(data.hash)
 		.then((commit:Git.Commit)=>{
 			ckCommit = commit;
@@ -131,58 +144,24 @@ socketserver.on('connect', (socket)=>{
 		.then(()=>{
 			Repo.setHeadDetached(ckCommit.id());
 			console.log('build');
-			var output:string[]=[];
 			return cli(`docker build -f ${repoDir}${target}/Dockerfile -t ${ckCommit.sha().slice(0,5)} ${repoDir}${target}`, output);
 		}).then((output:string[])=>{
 			console.log('add tag');
-			return cli(`docker tag ${ckCommit.sha().slice(0,5)} 127.0.0.1:5000/${ckCommit.sha().slice(0,5)}`, output);
+			return cli(`docker tag ${ckCommit.sha().slice(0,5)} ${registryUrl}/${ckCommit.sha().slice(0,5)}`, output);
 		}).then((output:string[])=>{
 			console.log('push');
-			return cli(`docker push 127.0.0.1:5000/${ckCommit.sha().slice(0,5)}`, output);
+			return cli(`docker push ${registryUrl}/${ckCommit.sha().slice(0,5)}`, output);
 		}).then((output:string[])=>{
 			console.log('end process');
 			socket.emit('finish');
+			resolve();
 		});
-	});
-});
+	})
+}
 
-var commitlist: string = '';
+
 app.get('/', (req: express.Request, res: express.Response) => {
 	res.sendFile('/src/index.html');
-});
-app.get('/:hash', (req: express.Request, res: express.Response) => {
-	let ckCommit:Git.Commit;
-	// Promise.resolve((repo:Git.Repository)=>{
-		if(Repo == undefined){
-			res.send();
-			return
-		}
-		Repo.getCommit(req.params.hash)
-		.then((commit:Git.Commit)=>{
-			ckCommit = commit
-			console.log('git checkout');
-			return Git.Checkout.tree(Repo, ckCommit ,{checkoutStrategy:Git.Checkout.STRATEGY.SAFE})
-		})
-		.then(()=>{
-			Repo.setHeadDetached(ckCommit.id());
-			console.log('build');
-			var output:string[]=[];
-			return cli(`docker build -f ${repoDir}${target}/Dockerfile -t ${ckCommit.sha().slice(0,5)} ${repoDir}${target}`, output);
-		}).then((output:string[])=>{
-			console.log('add tag');
-			return cli(`docker tag ${ckCommit.sha().slice(0,5)} 127.0.0.1:5000/${ckCommit.sha().slice(0,5)}`, output);
-		}).then((output:string[])=>{
-			console.log('push');
-			return cli(`docker push 127.0.0.1:5000/${ckCommit.sha().slice(0,5)}`, output);
-		}).then((output:string[])=>{
-			var resdata:string='';
-			for(var ln of output){
-				resdata += `${ln} <br>`;
-			}
-			console.log('end process');
-			res.send(resdata);
-		});
-	// });
 });
 
 app.listen(port, ()=>{
