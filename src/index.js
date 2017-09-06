@@ -30,17 +30,13 @@ cl.on('connect', () => {
 cl.on('data', (data) => {
     document.getElementById('log').appendChild(log(data));
 });
-cl.on('load', (data) => {
+
+cl.on('repoInit', (data) => {
     document.getElementById('list').innerHTML = data;
 });
-
-cl.on('repoInit', () => {
-    cl.emit('getData');
-});
-
-// function loadcomp() {
-//     cl.emit('getData');
-// }
+cl.on('repolist', (data) => {
+    document.getElementById('repo').innerHTML = data;
+})
 
 window.buildDocker = (hash) => {
     let child = document.getElementsByClassName('log');
@@ -56,4 +52,7 @@ window.sendurl = () => {
     let url = document.getElementById('url');
     console.log('url', url.value);
     cl.emit('url', url.value);
+}
+window.loadRepo = (localPath) => {
+    cl.emit('loadRepo', localPath);
 }
