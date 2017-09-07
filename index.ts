@@ -90,20 +90,16 @@ new Promise((resolve, reject)=>{
 			let localPath = repoDir+target;
 			let tRepo = Repo.get(localPath);
 			if(tRepo){
+				console.log('has');
 				loadRepo(localPath);
 			} else {
+				console.log('new');
 				// clone & load Repo commit
 				cloneRepo(data, localPath)
 			}
 		});
 		
 		socket.on('build', (data:any)=>{
-			// console.log('build');
-			
-			// if(Repo == undefined){
-			// 	console.log('NO Repo... build');
-			// 	return
-			// }
 			let output:string[]=[];
 			build(socket, currentRepo, output, data);
 		});
@@ -137,7 +133,7 @@ const build = (socket:SocketIO.Socket, repoPath:string, output:string[], data:an
 		.then(()=>{
 			repo.setHeadDetached(ckCommit.id());
 			console.log('build');
-			return cli(`docker build -f ${repoDir}${repo}/Dockerfile -t ${ckCommit.sha().slice(0,5)} ${repoDir}${repo.getNamespace()}`, output);
+			return cli(`docker build -f ${repoPath}/Dockerfile -t ${ckCommit.sha().slice(0,5)} ${repoPath}`, output);
 		}).then((output:string[])=>{
 			console.log('add tag');
 			return cli(`docker tag ${ckCommit.sha().slice(0,5)} ${registryUrl}/${ckCommit.sha().slice(0,5)}`, output);
