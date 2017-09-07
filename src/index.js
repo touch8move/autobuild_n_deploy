@@ -4,19 +4,15 @@ import $ from 'jquery';
 import bootstrap from 'bootstrap';
 
 function component(val) {
-    // var list = document.getElementById('list')
     var element = document.createElement('div');
     element.innerHTML = val;
     return element;
 }
 
 function log(val) {
-    // var element = document.getElementById('log');
     var div = document.createElement('div');
     div.innerHTML = val;
     return div;
-    // element.appendChild(element);
-    $('div');
 }
 
 var input = document.createElement('div');
